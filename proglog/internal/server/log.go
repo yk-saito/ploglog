@@ -19,7 +19,7 @@ func NewLog() *Log {
 // レコードをログに追加するメソッド
 func (c *Log) Append(record Record) (uint64, error) {
 	c.mu.Lock()
-	defer c.mu.Lock()
+	defer c.mu.Unlock()
 
 	record.Offset = uint64(len(c.records))
 	// recordsスライスにレコードを追加する
