@@ -51,6 +51,7 @@ func newSegment(dir string, baseOffset uint64, c Config) (*segment, error) {
 	return s, nil
 }
 
+// セグメントにレコードを書き込み、新たに追加されたレコードのオフセットを返す
 func (s *segment) Append(record *api.Record) (offset uint64, err error) {
 	cur := s.nextOffset
 	record.Offset = cur
@@ -58,10 +59,12 @@ func (s *segment) Append(record *api.Record) (offset uint64, err error) {
 	if err != nil {
 		return 0, err
 	}
+	// データをストアに追加する
 	_, pos, err := s.store.Append(p)
 	if err != nil {
 		return 0, err
 	}
+	// インデックスエントリを追加する
 	if err = s.index.Write(
 		// インデックスのオフセットは、ベースオフセットからの相対
 		uint32(s.nextOffset-uint64(s.baseOffset)),
@@ -71,4 +74,50 @@ func (s *segment) Append(record *api.Record) (offset uint64, err error) {
 	}
 	s.nextOffset++
 	return cur, nil
+}
+
+// 指定されたオフセットのレコードを返す
+func (s *segment) Read(off uint64) (*api.Record, error) {
+	// 絶対オフセットを相対オフセットに変換し、
+	// 関連するインデックスエントリの内容を取得する
+	_, pos, err := s.index.Read(int64(off - s.baseOffset))
+	if err != nil {
+		return nil, err
+	}
+	p, err := s.store.Read(pos)
+	if err != nil {
+		return nil, err
+	}
+	record := &api.Record{}
+	err = proto.Unmarshal(p, record)
+	return record, err
+}
+
+func (s *segment) IsMaxed() bool {
+	return s.store.size >= s.config.Segment.MaxStoreBytes ||
+		s.index.size >= s.config.Segment.MaxIndexBytes ||
+		s.index.isMaxed()
+}
+
+func (s *segment) Remove() error {
+	if err := s.Close(); err != nil {
+		return err
+	}
+	if err := os.Remove(s.index.Name()); err != nil {
+		return err
+	}
+	if err := os.Remove(s.store.Name()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *segment) Close() error {
+	if err := s.index.Close(); err != nil {
+		return err
+	}
+	if err := s.store.Close(); err != nil {
+		return err
+	}
+	return nil
 }
